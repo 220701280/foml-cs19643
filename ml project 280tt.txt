@@ -1,0 +1,474 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import joblib
+import warnings
+
+warnings.filterwarnings('ignore')
+
+class RainfallPredictionSystem:
+    def __init__(self):
+        self.data = None
+        self.model = None
+        self.scaler = StandardScaler()
+        self.features = ['Humidity', 'Temperature', 'Pressure', 'WindSpeed', 'WindDirection', 'CloudCover']
+
+    def load_data(self, filepath):
+        """
+        Load weather data from CSV file
+        """
+        try:
+            self.data = pd.read_csv(filepath)
+            print(f"Data loaded successfully with {self.data.shape[0]} records.")
+            print(f"Available features: {', '.join(self.data.columns)}")
+            return True
+        except Exception as e:
+            print(f"Error loading data: {e}")
+            return False
+
+    def generate_sample_data(self, num_samples=1000):
+        """
+        Generate sample weather data for demonstration purposes
+        """
+        print("Generating sample weather data...")
+        np.random.seed(42)
+
+        # Generate features
+        humidity = np.random.uniform(30, 100, num_samples)
+        temperature = np.random.uniform(5, 40, num_samples)
+        pressure = np.random.uniform(980, 1040, num_samples)
+        wind_speed = np.random.uniform(0, 40, num_samples)
+        wind_direction = np.random.uniform(0, 360, num_samples)
+        cloud_cover = np.random.uniform(0, 100, num_samples)
+
+        # Generate rainfall based on a simple rule (higher humidity and lower pressure increases chances)
+        rainfall_prob = 0.3 + 0.5 * (humidity / 100) - 0.3 * ((pressure - 980) / 60) + 0.2 * np.random.random(num_samples)
+        rainfall = (rainfall_prob > 0.5).astype(int)
+
+        # Create DataFrame
+        self.data = pd.DataFrame({
+            'Date': pd.date_range(start='2023-01-01', periods=num_samples).strftime('%Y-%m-%d'),
+            'Location': np.random.choice(['New York', 'Seattle', 'Miami', 'Denver', 'Chicago'], num_samples),
+            'Humidity': humidity,
+            'Temperature': temperature,
+            'Pressure': pressure,
+            'WindSpeed': wind_speed,
+            'WindDirection': wind_direction,
+            'CloudCover': cloud_cover,
+            'Rainfall': rainfall
+        })
+
+        print(f"Sample data generated with {num_samples} records.")
+        return self.data
+
+    def explore_data(self):
+        """
+        Explore and visualize the data
+        """
+        if self.data is None:
+            print("No data available. Please load or generate data first.")
+            return
+
+        print("\n--- Data Overview ---")
+        print(self.data.head())
+
+        print("\n--- Data Information ---")
+        print(self.data.info())
+
+        print("\n--- Statistical Summary ---")
+        print(self.data.describe())
+
+        print("\n--- Checking Missing Values ---")
+        print(self.data.isnull().sum())
+
+        # Correlation matrix
+        plt.figure(figsize=(10, 8))
+        corr_matrix = self.data[self.features + ['Rainfall']].corr()
+        sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt='.2f')
+        plt.title('Feature Correlation Matrix')
+        plt.tight_layout()
+        plt.show()
+
+        # Distribution of features with respect to rainfall
+        plt.figure(figsize=(15, 10))
+        for i, feature in enumerate(self.features):
+            plt.subplot(2, 3, i+1)
+            sns.boxplot(x='Rainfall', y=feature, data=self.data)
+            plt.title(f'Rainfall vs {feature}')
+        plt.tight_layout()
+        plt.show()
+
+        # Class distribution
+        plt.figure(figsize=(8, 6))
+        self.data['Rainfall'].value_counts().plot(kind='bar', color=['skyblue', 'lightcoral'])
+        plt.title('Rainfall Distribution')
+        plt.xlabel('Rainfall (0=No, 1=Yes)')
+        plt.ylabel('Count')
+        plt.tight_layout()
+        plt.show()
+
+    def preprocess_data(self):
+        """
+        Preprocess the data for model training
+        """
+        if self.data is None:
+            print("No data available. Please load or generate data first.")
+            return None, None, None, None
+
+        print("\nPreprocessing data...")
+
+        # Check if all required features are present
+        missing_features = [f for f in self.features if f not in self.data.columns]
+        if missing_features:
+            print(f"Error: Missing required features: {missing_features}")
+            return None, None, None, None
+
+        # Handle missing values
+        if self.data[self.features].isnull().sum().sum() > 0:
+            print("Filling missing values...")
+            self.data[self.features] = self.data[self.features].fillna(self.data[self.features].mean())
+
+        # Split data into features and target
+        X = self.data[self.features]
+        y = self.data['Rainfall']
+
+        # Split into training and testing sets
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+        # Scale features
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
+
+        print(f"Data preprocessed: Training samples: {X_train.shape[0]}, Testing samples: {X_test.shape[0]}")
+        return X_train_scaled, X_test_scaled, y_train, y_test
+
+    def train_model(self):
+        """
+        Train the Random Forest model for rainfall prediction
+        """
+        X_train_scaled, X_test_scaled, y_train, y_test = self.preprocess_data()
+
+        if X_train_scaled is None:
+            return False
+
+        print("\nTraining Random Forest model...")
+        self.model = RandomForestClassifier(n_estimators=100, random_state=42)
+        self.model.fit(X_train_scaled, y_train)
+
+        # Evaluate model performance
+        y_pred = self.model.predict(X_test_scaled)
+        accuracy = accuracy_score(y_test, y_pred)
+
+        print(f"Model training completed with accuracy: {accuracy:.4f}")
+        print("\nClassification Report:")
+        print(classification_report(y_test, y_pred))
+
+        # Confusion matrix
+        plt.figure(figsize=(8, 6))
+        cm = confusion_matrix(y_test, y_pred)
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+        plt.title('Confusion Matrix')
+        plt.xlabel('Predicted')
+        plt.ylabel('Actual')
+        plt.tight_layout()
+        plt.show()
+
+        # Feature importance
+        plt.figure(figsize=(10, 6))
+        importances = self.model.feature_importances_
+        indices = np.argsort(importances)[::-1]
+        plt.bar(range(len(importances)), importances[indices])
+        plt.title('Feature Importance')
+        plt.xlabel('Feature Index')
+        plt.ylabel('Importance')
+        plt.xticks(range(len(importances)), [self.features[i] for i in indices], rotation=45)
+        plt.tight_layout()
+        plt.show()
+
+        return True
+
+    def save_model(self, filepath='rainfall_prediction_model.pkl'):
+        """
+        Save the trained model to disk
+        """
+        if self.model is None:
+            print("No trained model available. Please train the model first.")
+            return False
+
+        try:
+            joblib.dump({
+                'model': self.model,
+                'scaler': self.scaler,
+                'features': self.features
+            }, filepath)
+            print(f"Model saved successfully to {filepath}")
+            return True
+        except Exception as e:
+            print(f"Error saving model: {e}")
+            return False
+
+    def load_model(self, filepath='rainfall_prediction_model.pkl'):
+        """
+        Load a trained model from disk
+        """
+        try:
+            model_data = joblib.load(filepath)
+            self.model = model_data['model']
+            self.scaler = model_data['scaler']
+            self.features = model_data['features']
+            print(f"Model loaded successfully from {filepath}")
+            return True
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            return False
+
+    def predict_rainfall(self, weather_data):
+        """
+        Predict rainfall based on provided weather data
+
+        Parameters:
+        weather_data (dict): Dictionary containing weather features
+
+        Returns:
+        dict: Prediction results
+        """
+        if self.model is None:
+            print("No trained model available. Please train or load a model first.")
+            return None
+
+        # Verify all required features are provided
+        missing_features = [f for f in self.features if f not in weather_data]
+        if missing_features:
+            print(f"Error: Missing required features: {missing_features}")
+            return None
+
+        # Prepare input data
+        input_data = pd.DataFrame([weather_data])
+        input_features = input_data[self.features]
+
+        # Scale features
+        input_scaled = self.scaler.transform(input_features)
+
+        # Make prediction
+        prediction_binary = self.model.predict(input_scaled)[0]
+        prediction_prob = self.model.predict_proba(input_scaled)[0]
+
+        # Calculate confidence
+        confidence = prediction_prob[1] if prediction_binary == 1 else prediction_prob[0]
+
+        result = {
+            'rainfall_predicted': bool(prediction_binary),
+            'probability': float(prediction_prob[1]),
+            'confidence': float(confidence),
+            'input_data': weather_data
+        }
+
+        return result
+
+    def batch_predict(self, filepath):
+        """
+        Make predictions on a batch of data from a CSV file
+        """
+        if self.model is None:
+            print("No trained model available. Please train or load a model first.")
+            return None
+
+        try:
+            # Load data
+            test_data = pd.read_csv(filepath)
+
+            # Check for required features
+            missing_features = [f for f in self.features if f not in test_data.columns]
+            if missing_features:
+                print(f"Error: Missing required features in batch data: {missing_features}")
+                return None
+
+            # Extract features
+            X_test = test_data[self.features]
+
+            # Scale features
+            X_test_scaled = self.scaler.transform(X_test)
+
+            # Make predictions
+            predictions = self.model.predict(X_test_scaled)
+            probabilities = self.model.predict_proba(X_test_scaled)[:, 1]
+
+            # Add predictions to dataframe
+            test_data['Rainfall_Predicted'] = predictions
+            test_data['Rainfall_Probability'] = probabilities
+
+            print(f"Batch prediction completed for {len(test_data)} samples.")
+            return test_data
+
+        except Exception as e:
+            print(f"Error in batch prediction: {e}")
+            return None
+
+    def generate_weather_forecast(self, location, days=7, base_data=None):
+        """
+        Generate a simple weather forecast for the specified location
+        """
+        if self.model is None:
+            print("No trained model available. Please train or load a model first.")
+            return None
+
+        if base_data is None:
+            # Use average values as base
+            base_data = {
+                'Humidity': 70,
+                'Temperature': 25,
+                'Pressure': 1013,
+                'WindSpeed': 15,
+                'WindDirection': 180,
+                'CloudCover': 50
+            }
+
+        forecast = []
+        dates = pd.date_range(start=pd.Timestamp.today(), periods=days)
+
+        for i, date in enumerate(dates):
+            # Add some randomness to base data
+            day_data = {
+                'Date': date.strftime('%Y-%m-%d'),
+                'Location': location,
+                'Humidity': max(30, min(100, base_data['Humidity'] + np.random.uniform(-10, 10))),
+                'Temperature': max(0, min(45, base_data['Temperature'] + np.random.uniform(-3, 3))),
+                'Pressure': max(980, min(1040, base_data['Pressure'] + np.random.uniform(-5, 5))),
+                'WindSpeed': max(0, min(50, base_data['WindSpeed'] + np.random.uniform(-5, 5))),
+                'WindDirection': (base_data['WindDirection'] + np.random.uniform(-30, 30)) % 360,
+                'CloudCover': max(0, min(100, base_data['CloudCover'] + np.random.uniform(-20, 20)))
+            }
+
+            # Predict rainfall
+            prediction = self.predict_rainfall(day_data)
+            day_data.update(prediction)
+            forecast.append(day_data)
+
+            # Update base data for next day (weather has some continuity)
+            base_data = {k: day_data[k] for k in base_data.keys()}
+
+        return forecast
+
+    def visualize_forecast(self, forecast):
+        """
+        Visualize the generated forecast
+        """
+        if not forecast:
+            print("No forecast data available.")
+            return
+
+        # Convert to DataFrame
+        df = pd.DataFrame(forecast)
+
+        # Plot temperature and rainfall probability
+        fig, ax1 = plt.subplots(figsize=(12, 6))
+
+        color = 'tab:red'
+        ax1.set_xlabel('Date')
+        ax1.set_ylabel('Temperature (°C)', color=color)
+        ax1.plot(df['Date'], df['Temperature'], color=color, marker='o')
+        ax1.tick_params(axis='y', labelcolor=color)
+        ax1.set_xticklabels(df['Date'], rotation=45)
+
+        ax2 = ax1.twinx()
+        color = 'tab:blue'
+        ax2.set_ylabel('Rainfall Probability (%)', color=color)
+        ax2.bar(df['Date'], df['probability'] * 100, color=color, alpha=0.5)
+        ax2.tick_params(axis='y', labelcolor=color)
+        ax2.set_ylim(0, 100)
+
+        # Add rainfall prediction as markers
+        for i, row in df.iterrows():
+            if row['rainfall_predicted']:
+                plt.scatter(i, 95, marker='☔', s=200, color='darkblue')
+
+        plt.title(f'Weather Forecast for {df["Location"].iloc[0]}')
+        plt.tight_layout()
+        plt.show()
+
+        # Plot additional features
+        fig, axs = plt.subplots(2, 2, figsize=(15, 10))
+
+        # Humidity
+        axs[0, 0].plot(df['Date'], df['Humidity'], marker='o', color='purple')
+        axs[0, 0].set_title('Humidity (%)')
+        axs[0, 0].set_xticklabels(df['Date'], rotation=45)
+
+        # Pressure
+        axs[0, 1].plot(df['Date'], df['Pressure'], marker='o', color='green')
+        axs[0, 1].set_title('Pressure (hPa)')
+        axs[0, 1].set_xticklabels(df['Date'], rotation=45)
+
+        # Wind Speed
+        axs[1, 0].plot(df['Date'], df['WindSpeed'], marker='o', color='orange')
+        axs[1, 0].set_title('Wind Speed (km/h)')
+        axs[1, 0].set_xticklabels(df['Date'], rotation=45)
+
+        # Cloud Cover
+        axs[1, 1].plot(df['Date'], df['CloudCover'], marker='o', color='gray')
+        axs[1, 1].set_title('Cloud Cover (%)')
+        axs[1, 1].set_xticklabels(df['Date'], rotation=45)
+
+        plt.tight_layout()
+        plt.show()
+
+
+def main():
+    """
+    Main function to demonstrate the rainfall prediction system
+    """
+    print("====== Rainfall Prediction System ======")
+    rps = RainfallPredictionSystem()
+
+    # Generate sample data
+    data = rps.generate_sample_data(num_samples=2000)
+
+    # Explore the data
+    rps.explore_data()
+
+    # Train the model
+    rps.train_model()
+
+    # Save the model
+    rps.save_model()
+
+    # Example prediction
+    example_data = {
+        'Humidity': 85,
+        'Temperature': 22,
+        'Pressure': 1005,
+        'WindSpeed': 25,
+        'WindDirection': 220,
+        'CloudCover': 70
+    }
+
+    prediction = rps.predict_rainfall(example_data)
+    print("\n======= Single Prediction Example =======")
+    print(f"Input weather data: {example_data}")
+    if prediction['rainfall_predicted']:
+        print(f"Prediction: Rain is likely with {prediction['probability']:.2%} probability")
+    else:
+        print(f"Prediction: Rain is unlikely (probability: {prediction['probability']:.2%})")
+
+    # Generate a forecast
+    print("\n======= 7-Day Weather Forecast Example =======")
+    forecast = rps.generate_weather_forecast('New York', days=7, base_data=example_data)
+
+    print("\nForecast Summary:")
+    for day in forecast:
+        rain_status = "✓" if day['rainfall_predicted'] else "✗"
+        print(f"{day['Date']}: {day['Temperature']:.1f}°C, Rain: {rain_status} ({day['probability']:.2%})")
+
+    # Visualize the forecast
+    rps.visualize_forecast(forecast)
+
+    print("\n====== System Demonstration Complete ======")
+
+
+if __name__ == "__main__":
+    main()
